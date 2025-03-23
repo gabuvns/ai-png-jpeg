@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor de PNG para JPEG</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .drop-area {
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            padding: 25px;
+            text-align: center;
+            margin: 20px 0;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .drop-area.highlight {
+            background-color: #f0f8ff;
+            border-color: #007bff;
+        }
+        #preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .preview-item {
+            position: relative;
+            width: 150px;
+            margin-bottom: 15px;
+        }
+        .preview-item img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .preview-item .file-name {
+            font-size: 12px;
+            word-break: break-all;
+            margin-top: 5px;
+        }
+        .preview-item .remove-btn {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: #ff4d4d;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        .btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .btn:hover {
+            background-color: #0069d9;
+        }
+        .quality-control {
+            margin-top: 15px;
+        }
+        .progress-container {
+            margin-top: 15px;
+            display: none;
+        }
+        .progress-bar {
+            height: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.2s;
+        }
+        .status {
+            margin-top: 5px;
+            font-size: 14px;
+        }
+        #download-all {
+            display: none;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Conversor de PNG para JPEG</h1>
+    <div class="container">
+        <p>Este aplicativo permite converter várias imagens PNG para o formato JPEG diretamente no navegador, sem enviar dados para um servidor.</p>
+        
+        <div class="drop-area" id="drop-area">
+            <p>Arraste e solte arquivos PNG aqui ou clique para selecionar</p>
+            <input type="file" id="file-input" accept=".png" multiple style="display: none;">
+        </div>
+        
+        <div class="quality-control">
+            <label for="quality">Qualidade JPEG (1-100): </label>
+            <input type="range" id="quality" min="1" max="100" value="85">
+            <span id="quality-value">85</span>
+        </div>
+        
+        <div class="controls">
+            <button id="convert-btn" class="btn" disabled>Converter para JPEG</button>
+            <button id="clear-btn" class="btn" style="background-color: #6c757d;" disabled>Limpar tudo</button>
+        </div>
+        
+        <div class="progress-container" id="progress-container">
+            <div class="progress-bar">
+                <div class="progress" id="progress"></div>
+            </div>
+            <div class="status" id="status">Processando...</div>
+        </div>
+        
+        <button id="download-all" class="btn">Download de todas as imagens convertidas (ZIP)</button>
+        
+        <div id="preview"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Elementos da interface
+            const dropArea = document.getElementById('drop-area');
+            const fileInput = document.getElementById('file-input');
+            const preview = document.getElementById('preview');
+            const convertBtn = document.getElementById('convert-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const qualitySlider = document.getElementById('quality');
+            const qualityValue = document.getElementById('quality-value');
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress');
+            const statusText = document.getElementById('status');
+            const downloadAllBtn = document.getElementById('download-all');
+            
+            // Variáveis de estado
+            let files = [];
+            let convertedImages = [];
+            
+            // Atualizar o valor da qualidade
+            qualitySlider.addEventListener('input', function() {
+                qualityValue.textContent = this.value;
+            });
+            
+            // Configurar área de arrastar e soltar
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dropArea.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                dropArea.classList.remove('highlight');
+            }
+            
+            // Processar arquivos soltos na área de drop
+            dropArea.addEventListener('drop', handleDrop, false);
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const droppedFiles = dt.files;
+                handleFiles(droppedFiles);
+            }
+            
+            // Processar arquivos do seletor de arquivos
+            dropArea.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            fileInput.addEventListener('change', function() {
+                handleFiles(this.files);
+            });
+            
+            // Processar os arquivos selecionados
+            function handleFiles(selectedFiles) {
+                const validFiles = Array.from(selectedFiles).filter(file => 
+                    file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')
+                );
+                
+                if (validFiles.length > 0) {
+                    files = [...files, ...validFiles];
+                    convertBtn.disabled = false;
+                    clearBtn.disabled = false;
+                    updatePreview();
+                } else {
+                    alert('Por favor, selecione apenas arquivos PNG.');
+                }
+            }
+            
+            // Atualizar a visualização prévia
+            function updatePreview() {
+                preview.innerHTML = '';
+                
+                files.forEach((file, index) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const div = document.createElement('div');
+                        div.className = 'preview-item';
+                        
+                        const img = document.createElement('img');
+                        img.src = e.target.result;
+                        
+                        const fileName = document.createElement('div');
+                        fileName.className = 'file-name';
+                        fileName.textContent = file.name;
+                        
+                        const removeBtn = document.createElement('button');
+                        removeBtn.className = 'remove-btn';
+                        removeBtn.textContent = '×';
+                        removeBtn.addEventListener('click', function() {
+                            files = files.filter((_, i) => i !== index);
+                            updatePreview();
+                            if (files.length === 0) {
+                                convertBtn.disabled = true;
+                                clearBtn.disabled = true;
+                            }
+                        });
+                        
+                        div.appendChild(img);
+                        div.appendChild(fileName);
+                        div.appendChild(removeBtn);
+                        preview.appendChild(div);
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+            
+            // Limpar tudo
+            clearBtn.addEventListener('click', function() {
+                files = [];
+                convertedImages = [];
+                preview.innerHTML = '';
+                this.disabled = true;
+                convertBtn.disabled = true;
+                downloadAllBtn.style.display = 'none';
+            });
+            
+            // Converter imagens
+            convertBtn.addEventListener('click', async function() {
+                const quality = parseInt(qualitySlider.value) / 100;
+                convertedImages = [];
+                
+                progressContainer.style.display = 'block';
+                convertBtn.disabled = true;
+                clearBtn.disabled = true;
+                
+                try {
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        statusText.textContent = `Processando ${i+1} de ${files.length}: ${file.name}`;
+                        progressBar.style.width = `${((i+1) / files.length) * 100}%`;
+                        
+                        // Converter imagem
+                        const convertedImage = await convertImage(file, quality);
+                        convertedImages.push({
+                            name: file.name.replace('.png', '.jpg'),
+                            data: convertedImage
+                        });
+                        
+                        // Pequena pausa para não bloquear a UI
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                    
+                    statusText.textContent = 'Conversão completa!';
+                    
+                    // Atualizar prévia com links de download
+                    updatePreviewWithConvertedImages();
+                    
+                    if (convertedImages.length > 1) {
+                        downloadAllBtn.style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('Erro durante a conversão:', error);
+                    statusText.textContent = 'Erro durante a conversão. Verifique o console para detalhes.';
+                }
+                
+                convertBtn.disabled = false;
+                clearBtn.disabled = false;
+            });
+            
+            // Converter uma única imagem
+            function convertImage(file, quality) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    
+                    reader.onload = function(e) {
+                        const img = new Image();
+                        img.onload = function() {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0);
+                            
+                            try {
+                                const jpegData = canvas.toDataURL('image/jpeg', quality);
+                                resolve(jpegData);
+                            } catch (error) {
+                                reject(error);
+                            }
+                        };
+                        
+                        img.onerror = function() {
+                            reject(new Error('Falha ao carregar a imagem'));
+                        };
+                        
+                        img.src = e.target.result;
+                    };
+                    
+                    reader.onerror = function() {
+                        reject(new Error('Falha ao ler o arquivo'));
+                    };
+                    
+                    reader.readAsDataURL(file);
+                });
+            }
+            
+            // Atualizar prévia com imagens convertidas
+            function updatePreviewWithConvertedImages() {
+                preview.innerHTML = '';
+                
+                convertedImages.forEach((item, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'preview-item';
+                    
+                    const img = document.createElement('img');
+                    img.src = item.data;
+                    
+                    const fileName = document.createElement('div');
+                    fileName.className = 'file-name';
+                    fileName.textContent = item.name;
+                    
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = item.data;
+                    downloadLink.download = item.name;
+                    downloadLink.className = 'btn';
+                    downloadLink.textContent = 'Download';
+                    downloadLink.style.fontSize = '12px';
+                    downloadLink.style.padding = '5px 10px';
+                    downloadLink.style.marginTop = '5px';
+                    downloadLink.style.display = 'block';
+                    downloadLink.style.textAlign = 'center';
+                    
+                    div.appendChild(img);
+                    div.appendChild(fileName);
+                    div.appendChild(downloadLink);
+                    preview.appendChild(div);
+                });
+            }
+            
+            // Baixar todas as imagens como ZIP
+            downloadAllBtn.addEventListener('click', async function() {
+                if (convertedImages.length === 0) return;
+                
+                const zip = new JSZip();
+                
+                for (const item of convertedImages) {
+                    // Converter dataURL para blob
+                    const response = await fetch(item.data);
+                    const blob = await response.blob();
+                    zip.file(item.name, blob);
+                }
+                
+                zip.generateAsync({type: 'blob'}).then(function(content) {
+                    const url = URL.createObjectURL(content);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = 'imagens_convertidas.zip';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                });
+            });
+        });
+    </script>
+</body>
+</html>
